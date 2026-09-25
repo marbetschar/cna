@@ -242,7 +242,7 @@ class LateralLayer(nn.Module):
                 best_channel = best_channel.reshape((x_lateral.shape[0],) + x_lateral.shape[2:] + (-1,))
 
                 self.mask = (torch.arange(0, self.n_alternative_cells).view(1, 1, 1, 1,
-                                                                            -1).cuda() == best_channel.unsqueeze(
+                                                                            -1).to(self.fabric.device) == best_channel.unsqueeze(
                     -1))
                 assert torch.all(torch.sum(self.mask, dim=4) == 1)
                 self.mask = self.mask.permute(0, 3, 4, 1, 2)

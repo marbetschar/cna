@@ -5,3 +5,5 @@ matplotlib~=3.8.2
 deepdiff~=6.7.1
 opencv-python~=4.9.0.80
 pandas~=2.1.4
+setuptools<80
+torchvision
