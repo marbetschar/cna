@@ -1,3 +1,6 @@
+# Uncomment --extra-index-url line to support GPUs requiring CUDA 12.6
+# Adjust extra-index-url based on information at: https://pytorch.org/get-started/previous-versions/
+#--extra-index-url https://download.pytorch.org/whl/cu126
 wandb~=0.16.1
 tqdm~=4.66.1
 lightning~=2.1.3
