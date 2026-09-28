@@ -252,11 +252,12 @@ def single_eval_epoch(
                                                                                    batch[0],
                                                                                    store_tensors=True,
                                                                                    mode="eval")
-            plt_img.append(batch[0])
-            plt_features.append(features)
-            plt_input_features.append(input_features)
-            plt_activations.append(lateral_features)
-            plt_activations_f.append(lateral_features_f)
+        # make sure to offload tensors from gpu to system memory:
+        plt_img.append(batch[0].cpu())
+        plt_features.append(features.cpu())
+        plt_input_features.append(input_features.cpu())
+        plt_activations.append(lateral_features.cpu())
+        plt_activations_f.append(lateral_features_f.cpu())
 
     plot = config['run']['plots']['enable'] and \
            (not config['run']['plots']['only_last_epoch'] or epoch == config['run']['n_epochs'])
