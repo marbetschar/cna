@@ -301,6 +301,7 @@ def run_training_and_capture(
     # to create a smooth animation
     
     capture_interval = capture_rate
+    frame_count = 0
     
     for epoch in range(epochs):
         print(f"\nEpoch {epoch + 1}/{epochs}...")
@@ -313,6 +314,8 @@ def run_training_and_capture(
             with torch.no_grad():
                 batch_features = feature_extractor(batch[0])
             
+            epoch_activations = []
+            
             z = None
             for view_idx in range(batch_features.shape[1]):
                 x_view_features = batch_features[:, view_idx, ...]
@@ -323,14 +326,25 @@ def run_training_and_capture(
                                     device=batch[0].device)
                 
                 features_lat = []
+                timestep_activations = []
                 
                 for t in range(config["lateral_model"]["max_timesteps"]):
                     lateral_network.model.update_ts(t)
                     x_in = torch.cat([x_view_features, z], dim=1)
                     
+                    # Capture activations for visualization
+                    with torch.no_grad():
+                        _, z_bin, _ = lateral_network.model.s2(x_in)
+                        firing_states = z_bin.mean(dim=(2, 3))
+                        timestep_activations.append(firing_states)
+                    
                     # Continue with normal training
                     z_float, z = lateral_network(x_in)
                     features_lat.append(z)
+                
+                # Store activations for this view
+                if timestep_activations:
+                    epoch_activations.extend(timestep_activations)
                 
                 features_lat = torch.stack(features_lat, dim=1)
                 features_lat_median = torch.median(features_lat, dim=1)[0]
@@ -351,32 +365,18 @@ def run_training_and_capture(
                 lateral_weights_2d = get_lateral_weights_2d(lateral_network)
                 lateral_weight_history.append(lateral_weights_2d.copy())
                 
-                # Get current activations by running a forward pass on a sample
-                with torch.no_grad():
-                    sample_batch = batch[0][:1]  # Take first image from current batch
-                    sample_features = feature_extractor(sample_batch)
-                    
-                    # Get firing states
-                    for view_idx in range(sample_features.shape[1]):
-                        x_view = sample_features[:, view_idx, ...]
-                        z_sample = None
-                        for t in range(config["lateral_model"]["max_timesteps"]):
-                            lateral_network.model.update_ts(t)
-                            x_in = torch.cat([x_view, z_sample] if z_sample is not None else x_view, dim=1)
-                            with torch.no_grad():
-                                _, z_bin, _ = lateral_network.model.s2(x_in)
-                            z_float, z_sample = lateral_network.model.s2(x_in)
-                        
-                        # Get firing states from last timestep
-                        firing_states = z_bin.mean(dim=(2, 3)).cpu().numpy()
-                        activation_history.append(firing_states.flatten())
-                        break  # Only process first view
+                # Get average activations from this batch
+                if epoch_activations:
+                    avg_activations = np.mean(np.concatenate([a.cpu().numpy() for a in epoch_activations], axis=0), axis=0)
+                    firing_states = (avg_activations > 0.5).astype(np.float32)
+                    activation_history.append(firing_states)
                 
                 # Capture input features
                 feat_np = batch_features[0, 0].cpu().numpy() if batch_features.is_cuda else batch_features[0, 0].numpy()
                 input_features_history.append(feat_np)
                 
                 frame_count += 1
+                epoch_activations = []  # Reset for next capture interval
         
         print(f"  Weights: min={weights_2d.min():.6f}, max={weights_2d.max():.6f}, mean={weights_2d.mean():.6f}")
         print(f"  Lateral Weights: min={lateral_weights_2d.min():.6f}, max={lateral_weights_2d.max():.6f}")
