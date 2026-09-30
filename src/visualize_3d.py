@@ -13,14 +13,13 @@ the network structure develops in response to the input.
 """
 
 import argparse
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib import cm, colors
+from matplotlib import cm
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 from matplotlib.colors import Normalize
 import numpy as np
@@ -216,7 +215,7 @@ def run_training_and_capture(
     train_loader,
     test_loader,
     epochs: int
-) -> Tuple[List[np.ndarray], Optional[torch.Tensor], Optional[torch.Tensor], List[np.ndarray]]:
+) -> Tuple[List[np.ndarray], Optional[torch.Tensor], Optional[torch.Tensor]]:
     """
     Run training and capture network state at each epoch.
     
@@ -224,13 +223,11 @@ def run_training_and_capture(
         weight_history: List of 2D weight matrices (out, in)
         input_image: Sample input image
         input_features: Sample input features
-        activation_history: List of activation patterns
     """
     feature_extractor.eval()
     lateral_network.eval()
     
     weight_history = []
-    activation_history = []
     input_image = None
     input_features = None
     
@@ -278,36 +275,16 @@ def run_training_and_capture(
                     torch.cat([x_view_features, features_lat_median], dim=1))
                 lateral_network.model.s2.hebbian_update(x_rearranged, features_lat_median)
         
-        # Capture weights and activations
+        # Capture weights
         weights_4d = get_weights_3d(lateral_network)
         weights_2d = extract_all_connections(weights_4d)
         weight_history.append(weights_2d.copy())
-        
-        # Get activations for the sample input (simplified)
-        with torch.no_grad():
-            # Just get the final activations
-            z = None
-            for view_idx in range(input_features.shape[1]):
-                x_view_features = input_features[:, view_idx, ...]
-                
-                if z is None:
-                    z = torch.zeros((x_view_features.shape[0], lateral_network.model.out_channels, 
-                                     x_view_features.shape[2], x_view_features.shape[3]), 
-                                    device=input_features.device)
-                
-                for t in range(config["lateral_model"]["max_timesteps"]):
-                    lateral_network.model.update_ts(t)
-                    x_in = torch.cat([x_view_features, z], dim=1)
-                    z_float, z = lateral_network(x_in)
-            
-            # Store the final activations
-            activation_history.append(z.detach().cpu().numpy())
         
         print(f"  Weights: min={weights_2d.min():.6f}, max={weights_2d.max():.6f}, mean={weights_2d.mean():.6f}")
         n_strong = np.sum(weights_2d > 0.1)
         print(f"  Strong connections (>0.1): {n_strong}/{weights_2d.size}")
     
-    return weight_history, input_image, input_features, activation_history
+    return weight_history, input_image, input_features
 
 
 def create_enhanced_visualization(
@@ -316,7 +293,6 @@ def create_enhanced_visualization(
     input_positions: np.ndarray,
     input_image: Optional[torch.Tensor] = None,
     input_features: Optional[torch.Tensor] = None,
-    activation_history: Optional[List[np.ndarray]] = None,
     output_dir: Path = None,
     fps: int = 5,
     dpi: int = 200,
@@ -341,7 +317,6 @@ def create_enhanced_visualization(
         input_positions,
         input_image=input_image,
         input_features=input_features,
-        activation_history=activation_history,
         output_path=output_dir / "network_structure_3d.mp4",
         fps=fps,
         dpi=dpi,
@@ -368,17 +343,7 @@ def create_enhanced_visualization(
             dpi=dpi
         )
     
-    # 4. Activation heatmaps (skip for now due to shape issues)
-    # if activation_history is not None and len(activation_history) > 0:
-    #     print("\n4. Creating activation heatmap video...")
-    #     create_activation_video(
-    #         activation_history,
-    #         output_dir / "activations_2d.mp4",
-    #         fps=fps,
-    #         dpi=dpi
-    #     )
-    
-    # 5. Connection statistics
+    # 4. Connection statistics
     print("\n5. Creating connection statistics...")
     create_connection_stats(
         weight_history,
@@ -398,7 +363,6 @@ def create_3d_network_video(
     input_positions: np.ndarray,
     input_image: Optional[torch.Tensor] = None,
     input_features: Optional[torch.Tensor] = None,
-    activation_history: Optional[List[np.ndarray]] = None,
     output_path: Path = None,
     fps: int = 5,
     dpi: int = 200,
@@ -413,7 +377,6 @@ def create_3d_network_video(
     - Connections as lines with color (plasma colormap) and width representing strength
     - Input image on the side
     - Feature maps from S1
-    - Activation patterns from S2
     """
     print(f"  Creating video with {len(output_positions)} output and {len(input_positions)} input neurons")
     print(f"  Frames: {len(weight_history)}")
@@ -734,77 +697,6 @@ def save_input_visualization(
     print(f"  Input visualization saved to: {output_path}")
 
 
-def create_activation_video(
-    activation_history: List[np.ndarray],
-    output_path: Path,
-    fps: int = 5,
-    dpi: int = 200
-):
-    """Create a video showing the activation patterns over training."""
-    if len(activation_history) == 0:
-        return
-    
-    # Stack activations: (frame, batch, timestep, channel, h, w)
-    # We'll take the first batch and first timestep for simplicity
-    n_frames = len(activation_history)
-    
-    # Get dimensions
-    sample_act = activation_history[0]
-    if len(sample_act.shape) >= 4:
-        n_channels = sample_act.shape[2] if len(sample_act.shape) > 3 else sample_act.shape[1]
-    else:
-        n_channels = 1
-    
-    # Create figure
-    fig = plt.figure(figsize=(12, 8), dpi=dpi)
-    
-    # Create a grid of subplots for each channel
-    grid_size = int(np.ceil(np.sqrt(n_channels)))
-    axes = []
-    for i in range(n_channels):
-        ax = fig.add_subplot(grid_size, grid_size, i + 1)
-        axes.append(ax)
-        ax.axis('off')
-    
-    # Hide unused axes
-    for i in range(n_channels, grid_size * grid_size):
-        axes.append(fig.add_subplot(grid_size, grid_size, i + 1))
-        axes[i].axis('off')
-    
-    fig.suptitle(f'Neuron Activations - Epoch 1', fontsize=16)
-    fig.tight_layout()
-    
-    # Initial activation maps
-    images = []
-    for ch in range(n_channels):
-        if ch < len(axes) and len(sample_act.shape) >= 4:
-            act_map = sample_act[0, 0, ch]
-            act_norm = (act_map - act_map.min()) / (act_map.max() - act_map.min() + 1e-10)
-            img = axes[ch].imshow(act_norm, cmap='hot', interpolation='nearest', aspect='auto')
-            images.append(img)
-    
-    def update(frame):
-        activations = activation_history[frame]
-        
-        for ch in range(n_channels):
-            if ch < len(axes) and ch < len(images) and len(activations.shape) >= 4:
-                act_map = activations[0, 0, ch]
-                act_norm = (act_map - act_map.min()) / (act_map.max() - act_map.min() + 1e-10)
-                images[ch].set_array(act_norm)
-        
-        fig.suptitle(f'Neuron Activations - Epoch {frame + 1}', fontsize=16)
-        
-        return images
-    
-    ani = FuncAnimation(fig, update, frames=n_frames, interval=1000/fps, blit=False)
-    
-    writer = FFMpegWriter(fps=fps, bitrate=15000)
-    ani.save(str(output_path), writer=writer)
-    plt.close(fig)
-    
-    print(f"  Activation video saved to: {output_path}")
-
-
 def create_connection_stats(weight_history: List[np.ndarray], output_path: Path, dpi: int = 200):
     """Create a plot showing connection statistics over training."""
     n_frames = len(weight_history)
@@ -921,7 +813,7 @@ def main():
     
     # Run training and capture state
     print("\nRunning training and capturing network state...")
-    weight_history, input_image, input_features, activation_history = run_training_and_capture(
+    weight_history, input_image, input_features = run_training_and_capture(
         config,
         feature_extractor,
         lateral_network,
@@ -938,7 +830,6 @@ def main():
         input_positions,
         input_image=input_image,
         input_features=input_features,
-        activation_history=activation_history,
         output_dir=output_dir,
         fps=args.fps,
         dpi=args.dpi,

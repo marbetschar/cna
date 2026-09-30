@@ -8,7 +8,7 @@ from pathlib import Path
 import argparse
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import numpy as np
 import torch
@@ -202,7 +202,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='Test 3D Visualization')
     parser.add_argument('--epochs', type=int, default=3, help='Number of epochs')
-    parser.add_argument('--output', type=str, default="../tmp/test_3d_small.mp4", help='Output path')
+    parser.add_argument('--output', type=str, default="../../tmp/test_3d_small.mp4", help='Output path')
     args = parser.parse_args()
     
     # Setup
