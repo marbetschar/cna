@@ -58,9 +58,6 @@ def parse_args():
                         help='Minimum weight to show any connection at all (default: 0.001)')
     parser.add_argument('--capture_rate', type=int, default=1,
                         help='Capture input features every N batches (default: 1 = every batch)')
-    parser.add_argument('--layout', type=str, default='circle',
-                        choices=['circle', 'grid', 'layers'],
-                        help='Layout for input neurons (default: circle)')
     parser.add_argument('--show_lateral_connections', type=bool, default=True,
                         help='Whether to show lateral connections (default: True)')
     parser.add_argument('--lateral_threshold', type=float, default=0.01,
@@ -149,77 +146,16 @@ def get_lateral_weights_2d(lateral_network: LateralNetwork) -> np.ndarray:
     return lateral_conn_2d
 
 
-def create_neuron_layout(n_neurons: int, layout: str = 'circle', radius: float = 3.0) -> np.ndarray:
-    """
-    Create 3D positions for neurons based on the specified layout.
-    
-    Args:
-        n_neurons: Number of neurons
-        layout: 'circle', 'grid', or 'layers'
-        radius: Radius for circle layout
-    
-    Returns:
-        positions: (n_neurons, 3) array of 3D positions
-    """
-    positions = np.zeros((n_neurons, 3))
-    
-    if layout == 'circle':
-        # Arrange in a circle
-        for i in range(n_neurons):
-            angle = 2 * np.pi * i / n_neurons
-            positions[i, 0] = radius * np.cos(angle)
-            positions[i, 1] = radius * np.sin(angle)
-            positions[i, 2] = 0
-    
-    elif layout == 'grid':
-        # Arrange in a square grid
-        cols = int(np.ceil(np.sqrt(n_neurons)))
-        rows = int(np.ceil(n_neurons / cols))
-        spacing = radius / max(cols, rows)
-        
-        for i in range(n_neurons):
-            row = i // cols
-            col = i % cols
-            positions[i, 0] = col * spacing
-            positions[i, 1] = row * spacing
-            positions[i, 2] = 0
-        
-        # Center
-        positions[:, 0] -= positions[:, 0].mean()
-        positions[:, 1] -= positions[:, 1].mean()
-    
-    elif layout == 'layers':
-        # Arrange in layers (for hierarchical networks)
-        # Split neurons into groups
-        n_groups = 4
-        group_size = n_neurons // n_groups
-        
-        for group in range(n_groups):
-            start = group * group_size
-            end = start + group_size if group < n_groups - 1 else n_neurons
-            
-            # Each group in a circle at different z-level
-            for i in range(start, end):
-                idx_in_group = i - start
-                angle = 2 * np.pi * idx_in_group / (end - start)
-                positions[i, 0] = radius * np.cos(angle)
-                positions[i, 1] = radius * np.sin(angle)
-                positions[i, 2] = group * 1.0 - 1.5  # Spread along z-axis
-    
-    return positions
-
 
 def create_network_positions(
     n_out: int,
-    n_in: int,
-    layout: str = 'circle'
+    n_in: int
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Create 3D positions for input and output neurons.
+    Create 3D positions for input and output neurons in a grid layout.
     
     Output neurons are placed at z=0 in a grid.
-    Input neurons are placed at z=-distance in the specified layout.
-    Lateral connections are drawn between output neurons at the same z=0 level.
+    Input neurons are placed at z=-3.0 in a grid.
     """
     # Output neurons at z=0 in a grid
     cols_out = int(np.ceil(np.sqrt(n_out)))
@@ -238,9 +174,25 @@ def create_network_positions(
     output_positions[:, 0] -= output_positions[:, 0].mean()
     output_positions[:, 1] -= output_positions[:, 1].mean()
     
-    # Input neurons at z=-3.0 in the specified layout
-    input_positions = create_neuron_layout(n_in, layout, radius=2.5)
-    input_positions[:, 2] -= 3.0  # Move behind output neurons
+    # Input neurons at z=-3.0 in a grid
+    cols_in = int(np.ceil(np.sqrt(n_in)))
+    rows_in = int(np.ceil(n_in / cols_in))
+    spacing_in = 1.0
+    
+    input_positions = np.zeros((n_in, 3))
+    for i in range(n_in):
+        row = i // cols_in
+        col = i % cols_in
+        input_positions[i, 0] = col * spacing_in
+        input_positions[i, 1] = row * spacing_in
+        input_positions[i, 2] = 0
+    
+    # Center input neurons
+    input_positions[:, 0] -= input_positions[:, 0].mean()
+    input_positions[:, 1] -= input_positions[:, 1].mean()
+    
+    # Move input neurons behind output neurons
+    input_positions[:, 2] -= 3.0
     
     return output_positions, input_positions
 
@@ -402,8 +354,7 @@ def create_enhanced_visualization(
     dpi: int = 200,
     min_connection: float = 0.001,
     connection_threshold: float = 0.05,
-    lateral_threshold: float = 0.01,
-    layout: str = 'circle'
+    lateral_threshold: float = 0.01
 ):
     """
     Create the enhanced visualization with multiple views.
@@ -1355,7 +1306,6 @@ def main():
     print(f"Connection threshold: {args.connection_threshold}")
     print(f"Min connection: {args.min_connection}")
     print(f"Lateral threshold: {args.lateral_threshold}")
-    print(f"Layout: {args.layout}")
     print(f"Capture rate: {args.capture_rate} (every {args.capture_rate} batches)")
     
     # Setup
@@ -1377,7 +1327,7 @@ def main():
     
     # Create neuron positions
     output_positions, input_positions = create_network_positions(
-        n_out, n_in, layout=args.layout
+        n_out, n_in
     )
     
     # Run training and capture state
@@ -1411,8 +1361,7 @@ def main():
         dpi=args.dpi,
         min_connection=args.min_connection,
         connection_threshold=args.connection_threshold,
-        lateral_threshold=args.lateral_threshold,
-        layout=args.layout
+        lateral_threshold=args.lateral_threshold
     )
     
     print("\nDone!")
