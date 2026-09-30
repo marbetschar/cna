@@ -738,27 +738,21 @@ def create_3d_network_video_with_firing(
                 weight = weights_2d[i, j]
                 
                 if line_idx < len(input_lines):
-                    if weight >= min_connection:
-                        # Normalize weight for width and opacity
-                        if current_max - current_min > 1e-10:
-                            norm_weight = (weight - current_min) / (current_max - current_min)
-                        else:
-                            norm_weight = 0
-                        
-                        # Connection strength from transparent to black
-                        # Use black color with alpha based on weight
-                        alpha_val = norm_weight
-                        linewidth = 0.3 + norm_weight * max_linewidth
-                        
-                        input_lines[line_idx].set_color('black')
-                        input_lines[line_idx].set_linewidth(linewidth)
-                        input_lines[line_idx].set_alpha(alpha_val)
-                        input_lines[line_idx].set_zorder(2)
+                    # Normalize weight (show all connections to see evolution)
+                    if current_max - current_min > 1e-10:
+                        norm_weight = (weight - current_min) / (current_max - current_min)
                     else:
-                        input_lines[line_idx].set_color('gray')
-                        input_lines[line_idx].set_linewidth(0.05)
-                        input_lines[line_idx].set_alpha(0.05)
-                        input_lines[line_idx].set_zorder(1)
+                        norm_weight = 0
+                    
+                    # Connection strength from transparent to black
+                    # Use black color with alpha based on weight
+                    alpha_val = norm_weight
+                    linewidth = 0.3 + norm_weight * max_linewidth
+                    
+                    input_lines[line_idx].set_color('black')
+                    input_lines[line_idx].set_linewidth(linewidth)
+                    input_lines[line_idx].set_alpha(alpha_val)
+                    input_lines[line_idx].set_zorder(2)
                 line_idx += 1
         
         # Update lateral connection lines
@@ -775,27 +769,21 @@ def create_3d_network_video_with_firing(
                 lateral_weight = lateral_weights_2d[i, j]
                 
                 if lateral_line_idx < len(lateral_lines):
-                    if lateral_weight >= lateral_threshold:
-                        # Normalize lateral weight
-                        if lateral_current_max - lateral_current_min > 1e-10:
-                            norm_lateral = (lateral_weight - lateral_current_min) / (lateral_current_max - lateral_current_min)
-                        else:
-                            norm_lateral = 0
-                        
-                        # Connection strength from transparent to black
-                        # Use black color with alpha based on weight
-                        alpha_val = norm_lateral
-                        linewidth = 0.2 + norm_lateral * lateral_max_linewidth
-                        
-                        lateral_lines[lateral_line_idx].set_color('black')
-                        lateral_lines[lateral_line_idx].set_linewidth(linewidth)
-                        lateral_lines[lateral_line_idx].set_alpha(alpha_val)
-                        lateral_lines[lateral_line_idx].set_zorder(3)  # Above input connections
+                    # Normalize lateral weight (show all connections to see evolution)
+                    if lateral_current_max - lateral_current_min > 1e-10:
+                        norm_lateral = (lateral_weight - lateral_current_min) / (lateral_current_max - lateral_current_min)
                     else:
-                        lateral_lines[lateral_line_idx].set_color('lightblue')
-                        lateral_lines[lateral_line_idx].set_linewidth(0.05)
-                        lateral_lines[lateral_line_idx].set_alpha(0.1)
-                        lateral_lines[lateral_line_idx].set_zorder(1)
+                        norm_lateral = 0
+                    
+                    # Connection strength from transparent to black
+                    # Use black color with alpha based on weight
+                    alpha_val = norm_lateral
+                    linewidth = 0.2 + norm_lateral * lateral_max_linewidth
+                    
+                    lateral_lines[lateral_line_idx].set_color('black')
+                    lateral_lines[lateral_line_idx].set_linewidth(linewidth)
+                    lateral_lines[lateral_line_idx].set_alpha(alpha_val)
+                    lateral_lines[lateral_line_idx].set_zorder(3)  # Above input connections
                 lateral_line_idx += 1
         
         # Update title
@@ -986,33 +974,27 @@ def create_lateral_connections_video(
             if idx < len(lines):
                 lateral_weight = lateral_weights_2d[i, j]
                 
-                if lateral_weight >= threshold:
-                    # Normalize weight
-                    if current_max - current_min > 1e-10:
-                        norm_weight = (lateral_weight - current_min) / (current_max - current_min)
-                    else:
-                        norm_weight = 0
-                    
-                    # Connection strength from transparent to black
-                    # Use black color with alpha based on weight
-                    alpha_val = norm_weight
-                    linewidth = 0.3 + norm_weight * max_linewidth
-                    
-                    lines[idx].set_color('black')
-                    lines[idx].set_linewidth(linewidth)
-                    lines[idx].set_alpha(alpha_val)
-                    lines[idx].set_zorder(2)
+                # Normalize weight (show all connections to see evolution)
+                if current_max - current_min > 1e-10:
+                    norm_weight = (lateral_weight - current_min) / (current_max - current_min)
                 else:
-                    lines[idx].set_color('lightgrey')
-                    lines[idx].set_linewidth(0.05)
-                    lines[idx].set_alpha(0.1)
-                    lines[idx].set_zorder(1)
+                    norm_weight = 0
+                
+                # Connection strength from transparent to black
+                # Use black color with alpha based on weight
+                alpha_val = norm_weight
+                linewidth = 0.3 + norm_weight * max_linewidth
+                
+                lines[idx].set_color('black')
+                lines[idx].set_linewidth(linewidth)
+                lines[idx].set_alpha(alpha_val)
+                lines[idx].set_zorder(2)
         
         # Update title
-        n_active = np.sum(lateral_weights_2d > threshold)
+        n_active = np.sum(lateral_weights_2d > 0)  # All connections are now shown
         ax_3d.set_title(
             f'Lateral Connections - Epoch {frame + 1}\n' \
-            f'Active connections: {n_active}/{len(lines)}, Range: [{current_min:.4f}, {current_max:.4f}]', 
+            f'All connections: {len(lines)}, Range: [{current_min:.4f}, {current_max:.4f}]', 
             fontsize=14
         )
         
