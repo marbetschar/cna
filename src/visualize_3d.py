@@ -263,7 +263,7 @@ def run_training_and_capture(
     train_loader,
     test_loader,
     epochs: int
-) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray], Optional[torch.Tensor], Optional[torch.Tensor]]:
+) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray], List[np.ndarray], Optional[torch.Tensor], Optional[torch.Tensor]]:
     """
     Run training and capture network state at each epoch.
     
@@ -271,6 +271,7 @@ def run_training_and_capture(
         weight_history: List of 2D weight matrices (out, in)
         activation_history: List of neuron activation states (firing or not)
         lateral_weight_history: List of lateral connection matrices
+        input_features_history: List of input features per epoch
         input_image: Sample input image
         input_features: Sample input features
     """
@@ -280,6 +281,7 @@ def run_training_and_capture(
     weight_history = []
     activation_history = []  # Will store firing states for each epoch
     lateral_weight_history = []  # Will store lateral connection evolution
+    input_features_history = []  # Will store input features per epoch
     input_image = None
     input_features = None
     
@@ -296,6 +298,7 @@ def run_training_and_capture(
         print(f"\nEpoch {epoch + 1}/{epochs}...")
         
         epoch_activations = []  # Store activations across timesteps
+        epoch_input_features = None  # Will store features from first batch
         
         # Training loop
         for i, batch in enumerate(tqdm(train_loader, 
@@ -304,6 +307,10 @@ def run_training_and_capture(
                                         desc=f"  Training")):
             with torch.no_grad():
                 batch_features = feature_extractor(batch[0])
+                # Capture features from first batch of the epoch
+                if i == 0:
+                    feat_np = batch_features[0, 0].cpu().numpy() if batch_features.is_cuda else batch_features[0, 0].numpy()
+                    epoch_input_features = feat_np
             
             z = None
             for view_idx in range(batch_features.shape[1]):
@@ -365,6 +372,13 @@ def run_training_and_capture(
         lateral_weights_2d = get_lateral_weights_2d(lateral_network)
         lateral_weight_history.append(lateral_weights_2d.copy())
         
+        # Store input features from first batch of this epoch
+        if epoch_input_features is not None:
+            input_features_history.append(epoch_input_features)
+        else:
+            # Fallback to zeros if no batch was processed
+            input_features_history.append(np.zeros((lateral_network.model.in_channels, 32, 32)))
+        
         print(f"  Weights: min={weights_2d.min():.6f}, max={weights_2d.max():.6f}, mean={weights_2d.mean():.6f}")
         print(f"  Lateral Weights: min={lateral_weights_2d.min():.6f}, max={lateral_weights_2d.max():.6f}")
         n_strong = np.sum(weights_2d > 0.1)
@@ -372,13 +386,14 @@ def run_training_and_capture(
         n_active = np.sum(firing_states > 0)
         print(f"  Active neurons: {n_active}/{firing_states.size}")
     
-    return weight_history, activation_history, lateral_weight_history, input_image, input_features
+    return weight_history, activation_history, lateral_weight_history, input_features_history, input_image, input_features
 
 
 def create_enhanced_visualization(
     weight_history: List[np.ndarray],
     activation_history: List[np.ndarray],
     lateral_weight_history: List[np.ndarray],
+    input_features_history: List[np.ndarray],
     output_positions: np.ndarray,
     input_positions: np.ndarray,
     input_image: Optional[torch.Tensor] = None,
@@ -406,6 +421,7 @@ def create_enhanced_visualization(
         weight_history,
         activation_history,
         lateral_weight_history,
+        input_features_history,
         output_positions,
         input_positions,
         input_image=input_image,
@@ -477,6 +493,7 @@ def create_3d_network_video_with_firing(
     weight_history: List[np.ndarray],
     activation_history: List[np.ndarray],
     lateral_weight_history: List[np.ndarray],
+    input_features_history: List[np.ndarray],
     output_positions: np.ndarray,
     input_positions: np.ndarray,
     input_image: Optional[torch.Tensor] = None,
@@ -568,19 +585,60 @@ def create_3d_network_video_with_firing(
         linewidths=0.5
     )
     
-    # Plot input neurons (red points)
-    input_scatter = ax_3d.scatter(
-        input_positions[:, 0],
-        input_positions[:, 1],
-        input_positions[:, 2],
-        c='red',
-        s=60,
-        alpha=0.9,
-        depthshade=True,
-        label='Input Neurons',
-        edgecolors='black',
-        linewidths=0.3
-    )
+    # Plot input neurons with colors based on their activation
+    # If input_features_history is available, use actual activation values for frame 0
+    if input_features_history and len(input_features_history) > 0:
+        feat_array = input_features_history[0]
+        # Average over spatial dimensions: (channels, height, width) -> (channels,)
+        input_activations = feat_array.mean(axis=(1, 2))
+        # Normalize to [0, 1] for coloring
+        input_activations_norm = (input_activations - input_activations.min()) / (input_activations.max() - input_activations.min() + 1e-10)
+        # Use viridis colormap for input activations (goes from purple to yellow)
+        input_colors = cm.viridis(input_activations_norm)
+        input_scatter = ax_3d.scatter(
+            input_positions[:, 0],
+            input_positions[:, 1],
+            input_positions[:, 2],
+            c=input_colors,
+            s=60,
+            alpha=0.9,
+            depthshade=True,
+            label='Input Neurons',
+            edgecolors='black',
+            linewidths=0.3
+        )
+    elif input_features is not None:
+        # Fallback to the single sample features
+        feat_array = input_features[0, 0].cpu().numpy() if input_features.is_cuda else input_features[0, 0].numpy()
+        input_activations = feat_array.mean(axis=(1, 2))
+        input_activations_norm = (input_activations - input_activations.min()) / (input_activations.max() - input_activations.min() + 1e-10)
+        input_colors = cm.viridis(input_activations_norm)
+        input_scatter = ax_3d.scatter(
+            input_positions[:, 0],
+            input_positions[:, 1],
+            input_positions[:, 2],
+            c=input_colors,
+            s=60,
+            alpha=0.9,
+            depthshade=True,
+            label='Input Neurons',
+            edgecolors='black',
+            linewidths=0.3
+        )
+    else:
+        # Fallback to uniform red if no features available
+        input_scatter = ax_3d.scatter(
+            input_positions[:, 0],
+            input_positions[:, 1],
+            input_positions[:, 2],
+            c='red',
+            s=60,
+            alpha=0.9,
+            depthshade=True,
+            label='Input Neurons',
+            edgecolors='black',
+            linewidths=0.3
+        )
     
     # Create all possible input connection lines
     input_lines = []
@@ -641,6 +699,14 @@ def create_3d_network_video_with_firing(
     cbar = fig.colorbar(dummy_mappable, ax=ax_3d, shrink=0.6, aspect=20, pad=0.05)
     cbar.set_label('Connection Strength (transparent to black)', fontsize=12)
     
+    # Add colorbar for input neuron activations (if features available)
+    if input_features is not None:
+        input_cmap = cm.viridis
+        dummy_input = cm.ScalarMappable(cmap=input_cmap, norm=Normalize(vmin=0, vmax=1))
+        dummy_input.set_array([])
+        input_cbar = fig.colorbar(dummy_input, ax=ax_3d, shrink=0.6, aspect=20, pad=0.15)
+        input_cbar.set_label('Input Neuron Activation', fontsize=12)
+    
     # Add custom legend for firing states
     from matplotlib.patches import Patch
     legend_elements = [
@@ -670,6 +736,20 @@ def create_3d_network_video_with_firing(
         # Update neuron colors based on firing state
         neuron_colors = np.array(['grey' if firing_states[i] < 0.5 else 'limegreen' for i in range(n_out)])
         output_scatter.set_color(neuron_colors)
+        
+        # Update input neuron colors based on current input features
+        if input_features_history and frame < len(input_features_history):
+            feat_array = input_features_history[frame]
+            # Average over spatial dimensions to get per-channel activation
+            input_activations = feat_array.mean(axis=(1, 2))
+            # Normalize to [0, 1] for coloring
+            if input_activations.max() - input_activations.min() > 1e-10:
+                input_activations_norm = (input_activations - input_activations.min()) / (input_activations.max() - input_activations.min())
+            else:
+                input_activations_norm = np.zeros_like(input_activations)
+            # Use viridis colormap for input activations
+            input_colors = cm.viridis(input_activations_norm)
+            input_scatter.set_color(input_colors)
         
         # Update all input connection lines
         line_idx = 0
@@ -1302,7 +1382,7 @@ def main():
     
     # Run training and capture state
     print("\nRunning training and capturing network state...")
-    weight_history, activation_history, lateral_weight_history, input_image, input_features = run_training_and_capture(
+    weight_history, activation_history, lateral_weight_history, input_features_history, input_image, input_features = run_training_and_capture(
         config,
         feature_extractor,
         lateral_network,
@@ -1317,6 +1397,7 @@ def main():
         weight_history,
         activation_history,
         lateral_weight_history,
+        input_features_history,
         output_positions,
         input_positions,
         input_image=input_image,
