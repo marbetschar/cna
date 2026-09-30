@@ -3,12 +3,13 @@ Enhanced 3D Network Visualization with Neuron Firing States and Lateral Connecti
 
 This script creates an advanced 3D visualization that shows:
 1. The network as a 3D grid structure with neurons as points
-2. Neuron firing states: green for firing, grey for inactive
-3. Input connections (from feature extractor to lateral network)
-4. Lateral connections (between neurons in the lateral network)
+2. Neuron firing states: lime green for firing, grey for inactive
+3. Input connections (from feature extractor to lateral network) with strength-based opacity/width
+4. Lateral connections (between neurons in the lateral network) with strength-based opacity/width
 5. Animation over training epochs showing evolution
 6. Evolution of lateral connections over timesteps
 
+Connection strength is visualized with a gradient from transparent (weight 0) to black (weight 1.0).
 The visualization provides a comprehensive view of how the network behaves during training.
 """
 
@@ -21,7 +22,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.animation import FuncAnimation, FFMpegWriter
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, LinearSegmentedColormap
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -51,10 +52,6 @@ def parse_args():
                         help='DPI for the video (default: 200)')
     parser.add_argument('--fps', type=int, default=5,
                         help='Frames per second for the video (default: 5)')
-    parser.add_argument('--train_images', type=int, default=2,
-                        help='Number of training images (default: 2)')
-    parser.add_argument('--test_images', type=int, default=1,
-                        help='Number of test images (default: 1)')
     parser.add_argument('--connection_threshold', type=float, default=0.05,
                         help='Minimum weight to show as a strong connection (default: 0.05)')
     parser.add_argument('--min_connection', type=float, default=0.001,
@@ -592,20 +589,6 @@ def create_3d_network_video_with_firing(
         linewidths=0.3
     )
     
-    # Plot lateral neurons (blue points - these represent the same neurons but for lateral visualization)
-    lateral_scatter = ax_3d.scatter(
-        lateral_positions[:, 0],
-        lateral_positions[:, 1],
-        lateral_positions[:, 2],
-        c='blue',
-        s=40,
-        alpha=0.7,
-        depthshade=True,
-        label='Lateral Reference',
-        edgecolors='black',
-        linewidths=0.2
-    )
-    
     # Create all possible input connection lines
     input_lines = []
     for i in range(n_out):
@@ -654,11 +637,16 @@ def create_3d_network_video_with_firing(
     # Set initial title
     ax_3d.set_title(f'3D Network Structure with Firing States - Epoch 1', fontsize=14)
     
-    # Add colorbar for connection strength
-    dummy_mappable = cm.ScalarMappable(cmap=cm.plasma, norm=Normalize(vmin=0, vmax=1))
+    # Add colorbar for connection strength (transparent to black)
+    # Create a custom gradient from transparent to black
+    grad = np.linspace(0, 1, 256).reshape(1, -1)
+    grad = np.vstack((grad, grad, grad, np.ones_like(grad)))
+    grad = grad.reshape(-1, 4)
+    custom_cmap = LinearSegmentedColormap.from_list('trans_to_black', ['white', 'black'], N=256)
+    dummy_mappable = cm.ScalarMappable(cmap=custom_cmap, norm=Normalize(vmin=0, vmax=1))
     dummy_mappable.set_array([])
     cbar = fig.colorbar(dummy_mappable, ax=ax_3d, shrink=0.6, aspect=20, pad=0.05)
-    cbar.set_label('Connection Strength', fontsize=12)
+    cbar.set_label('Connection Strength (transparent to black)', fontsize=12)
     
     # Add custom legend for firing states
     from matplotlib.patches import Patch
@@ -700,26 +688,20 @@ def create_3d_network_video_with_firing(
                 
                 if line_idx < len(input_lines):
                     if weight >= min_connection:
-                        # Normalize weight for color and width
+                        # Normalize weight for width and opacity
                         if current_max - current_min > 1e-10:
                             norm_weight = (weight - current_min) / (current_max - current_min)
                         else:
                             norm_weight = 0
                         
-                        # Color from plasma colormap
-                        color = cm.plasma(norm_weight)
+                        # Connection strength from transparent to black
+                        # Use black color with alpha based on weight
+                        alpha_val = norm_weight
+                        linewidth = 0.3 + norm_weight * max_linewidth
                         
-                        # Width based on weight
-                        if weight >= connection_threshold:
-                            linewidth = 0.3 + norm_weight * max_linewidth
-                            alpha = 1.0
-                        else:
-                            linewidth = 0.1 + norm_weight * 0.3
-                            alpha = 0.3
-                        
-                        input_lines[line_idx].set_color(color)
+                        input_lines[line_idx].set_color('black')
                         input_lines[line_idx].set_linewidth(linewidth)
-                        input_lines[line_idx].set_alpha(alpha)
+                        input_lines[line_idx].set_alpha(alpha_val)
                         input_lines[line_idx].set_zorder(2)
                     else:
                         input_lines[line_idx].set_color('gray')
@@ -749,14 +731,14 @@ def create_3d_network_video_with_firing(
                         else:
                             norm_lateral = 0
                         
-                        # Color from viridis colormap (different from input connections)
-                        color = cm.viridis(norm_lateral)
+                        # Connection strength from transparent to black
+                        # Use black color with alpha based on weight
+                        alpha_val = norm_lateral
                         linewidth = 0.2 + norm_lateral * lateral_max_linewidth
-                        alpha = 0.8 + norm_lateral * 0.2
                         
-                        lateral_lines[lateral_line_idx].set_color(color)
+                        lateral_lines[lateral_line_idx].set_color('black')
                         lateral_lines[lateral_line_idx].set_linewidth(linewidth)
-                        lateral_lines[lateral_line_idx].set_alpha(alpha)
+                        lateral_lines[lateral_line_idx].set_alpha(alpha_val)
                         lateral_lines[lateral_line_idx].set_zorder(3)  # Above input connections
                     else:
                         lateral_lines[lateral_line_idx].set_color('lightblue')
@@ -823,7 +805,7 @@ def create_3d_network_video_with_firing(
             ax_features.set_title('S1 Feature Maps', fontsize=12)
             ax_features.axis('off')
         
-        return input_lines + lateral_lines + [output_scatter, input_scatter, lateral_scatter, ax_3d]
+        return input_lines + lateral_lines + [output_scatter, input_scatter, ax_3d]
     
     # Create animation
     ani = FuncAnimation(fig, update, frames=n_frames, 
@@ -860,6 +842,9 @@ def create_lateral_connections_video(
     
     video_dpi = min(dpi, 150)
     fig = plt.figure(figsize=(12, 10), dpi=video_dpi)
+    
+    # Create custom colormap for transparent to black gradient
+    custom_cmap = LinearSegmentedColormap.from_list('trans_to_black', ['white', 'black'], N=256)
     
     # Create 3D subplot
     ax_3d = fig.add_subplot(111, projection='3d')
@@ -913,11 +898,11 @@ def create_lateral_connections_video(
             lines.append(line)
             line_indices.append((i, j))
     
-    # Add colorbar
-    dummy_mappable = cm.ScalarMappable(cmap=cm.viridis, norm=Normalize(vmin=global_min, vmax=global_max))
+    # Add colorbar for lateral connection strength (transparent to black)
+    dummy_mappable = cm.ScalarMappable(cmap=custom_cmap, norm=Normalize(vmin=global_min, vmax=global_max))
     dummy_mappable.set_array([])
     cbar = fig.colorbar(dummy_mappable, ax=ax_3d, shrink=0.6, aspect=20, pad=0.05)
-    cbar.set_label('Lateral Connection Strength', fontsize=12)
+    cbar.set_label('Lateral Connection Strength (transparent to black)', fontsize=12)
     
     ax_3d.set_title(f'Lateral Connections Evolution - Epoch 1', fontsize=14)
     
@@ -949,14 +934,14 @@ def create_lateral_connections_video(
                     else:
                         norm_weight = 0
                     
-                    # Color from viridis colormap
-                    color = cm.viridis(norm_weight)
+                    # Connection strength from transparent to black
+                    # Use black color with alpha based on weight
+                    alpha_val = norm_weight
                     linewidth = 0.3 + norm_weight * max_linewidth
-                    alpha = 0.6 + norm_weight * 0.4
                     
-                    lines[idx].set_color(color)
+                    lines[idx].set_color('black')
                     lines[idx].set_linewidth(linewidth)
-                    lines[idx].set_alpha(alpha)
+                    lines[idx].set_alpha(alpha_val)
                     lines[idx].set_zorder(2)
                 else:
                     lines[idx].set_color('lightgrey')
@@ -1005,7 +990,7 @@ def create_2d_matrix_video(
     
     img = ax.imshow(
         matrices_array[0],
-        cmap='plasma',
+        cmap='Greys',
         vmin=global_min,
         vmax=global_max,
         interpolation='nearest',
@@ -1290,12 +1275,6 @@ def main():
     config = get_config(args.config)
     config['run']['n_epochs'] = args.epochs
     
-    # Override dataset sizes
-    if args.train_images is not None:
-        config['dataset']['train_dataset_params']['num_images'] = args.train_images
-    if args.test_images is not None:
-        config['dataset']['test_dataset_params']['num_images'] = args.test_images
-    
     print("="*70)
     print("Enhanced 3D Network Visualization with Firing States and Lateral Connections")
     print("="*70)
@@ -1306,9 +1285,6 @@ def main():
     print(f"Min connection: {args.min_connection}")
     print(f"Lateral threshold: {args.lateral_threshold}")
     print(f"Layout: {args.layout}")
-    print(f"Show lateral connections: {args.show_lateral_connections}")
-    print(f"Train images: {config['dataset']['train_dataset_params']['num_images']}")
-    print(f"Test images: {config['dataset']['test_dataset_params']['num_images']}")
     
     # Setup
     fabric = setup_fabric(config)
