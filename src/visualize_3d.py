@@ -396,6 +396,7 @@ def create_enhanced_visualization(
     print("\n2. Creating lateral connections evolution video...")
     create_lateral_connections_video(
         lateral_weight_history,
+        activation_history,
         output_positions,
         output_path=output_dir / "lateral_connections.mp4",
         fps=fps,
@@ -873,6 +874,7 @@ def create_3d_network_video_with_firing(
 
 def create_lateral_connections_video(
     lateral_weight_history: List[np.ndarray],
+    activation_history: List[np.ndarray],
     output_positions: np.ndarray,
     output_path: Path,
     fps: int = 5,
@@ -914,12 +916,14 @@ def create_lateral_connections_video(
     ax_3d.set_ylim([y_min, y_max])
     ax_3d.set_zlim([z_min, z_max])
     
-    # Plot neurons as reference points
+    # Plot neurons with initial firing state (grey)
+    firing_states = activation_history[0] if activation_history else np.zeros(n_out)
+    neuron_colors = np.array(['grey' if firing_states[i] < 0.5 else 'limegreen' for i in range(n_out)])
     neuron_scatter = ax_3d.scatter(
         output_positions[:, 0],
         output_positions[:, 1],
         output_positions[:, 2],
-        c='blue',
+        c=neuron_colors,
         s=80,
         alpha=0.8,
         depthshade=True,
@@ -961,6 +965,11 @@ def create_lateral_connections_video(
     def update(frame: int):
         """Update function for animation."""
         lateral_weights_2d = lateral_weight_history[frame]
+        firing_states = activation_history[frame] if frame < len(activation_history) else activation_history[-1]
+        
+        # Update neuron colors based on firing state
+        neuron_colors = np.array(['grey' if firing_states[i] < 0.5 else 'limegreen' for i in range(n_out)])
+        neuron_scatter.set_color(neuron_colors)
         
         # Normalize current weights
         current_min = lateral_weights_2d.min()
