@@ -56,6 +56,8 @@ def parse_args():
                         help='Minimum weight to show as a strong connection (default: 0.05)')
     parser.add_argument('--min_connection', type=float, default=0.001,
                         help='Minimum weight to show any connection at all (default: 0.001)')
+    parser.add_argument('--capture_rate', type=int, default=1,
+                        help='Capture input features every N batches (default: 1 = every batch)')
     parser.add_argument('--layout', type=str, default='circle',
                         choices=['circle', 'grid', 'layers'],
                         help='Layout for input neurons (default: circle)')
@@ -262,7 +264,8 @@ def run_training_and_capture(
     lateral_network: LateralNetwork,
     train_loader,
     test_loader,
-    epochs: int
+    epochs: int,
+    capture_rate: int = 1
 ) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray], List[np.ndarray], Optional[torch.Tensor], Optional[torch.Tensor]]:
     """
     Run training and capture network state at each epoch.
@@ -271,7 +274,7 @@ def run_training_and_capture(
         weight_history: List of 2D weight matrices (out, in)
         activation_history: List of neuron activation states (firing or not)
         lateral_weight_history: List of lateral connection matrices
-        input_features_history: List of input features per epoch
+        input_features_history: List of input features per frame
         input_image: Sample input image
         input_features: Sample input features
     """
@@ -279,9 +282,9 @@ def run_training_and_capture(
     lateral_network.eval()
     
     weight_history = []
-    activation_history = []  # Will store firing states for each epoch
-    lateral_weight_history = []  # Will store lateral connection evolution
-    input_features_history = []  # Will store input features per epoch
+    activation_history = []  # Will store firing states for each frame
+    lateral_weight_history = []  # Will store lateral connection evolution for each frame
+    input_features_history = []  # Will store input features per frame
     input_image = None
     input_features = None
     
@@ -294,23 +297,21 @@ def run_training_and_capture(
         break
     
     # Run training epochs
+    # We'll capture state at each batch (or at capture_rate intervals)
+    # to create a smooth animation
+    
+    capture_interval = capture_rate
+    
     for epoch in range(epochs):
         print(f"\nEpoch {epoch + 1}/{epochs}...")
         
-        epoch_activations = []  # Store activations across timesteps
-        epoch_input_features = None  # Will store features from first batch
-        
         # Training loop
-        for i, batch in enumerate(tqdm(train_loader, 
+        for batch_idx, batch in enumerate(tqdm(train_loader, 
                                         total=len(train_loader),
                                         colour="GREEN",
                                         desc=f"  Training")):
             with torch.no_grad():
                 batch_features = feature_extractor(batch[0])
-                # Capture features from first batch of the epoch
-                if i == 0:
-                    feat_np = batch_features[0, 0].cpu().numpy() if batch_features.is_cuda else batch_features[0, 0].numpy()
-                    epoch_input_features = feat_np
             
             z = None
             for view_idx in range(batch_features.shape[1]):
@@ -322,27 +323,14 @@ def run_training_and_capture(
                                     device=batch[0].device)
                 
                 features_lat = []
-                timestep_activations = []  # Store activations for each timestep
                 
                 for t in range(config["lateral_model"]["max_timesteps"]):
                     lateral_network.model.update_ts(t)
                     x_in = torch.cat([x_view_features, z], dim=1)
                     
-                    # Get activations (firing states) at this timestep
-                    with torch.no_grad():
-                        _, z_bin, _ = lateral_network.model.s2(x_in)
-                        # z_bin contains the binary firing states
-                        # Flatten spatial dimensions to get per-neuron firing
-                        firing_states = z_bin.mean(dim=(2, 3))  # Average across spatial positions
-                        timestep_activations.append(firing_states.cpu().numpy())
-                    
                     # Continue with normal training
                     z_float, z = lateral_network(x_in)
                     features_lat.append(z)
-                
-                # Store the last timestep's activations for this batch
-                if timestep_activations:
-                    epoch_activations.append(timestep_activations[-1])
                 
                 features_lat = torch.stack(features_lat, dim=1)
                 features_lat_median = torch.median(features_lat, dim=1)[0]
@@ -351,33 +339,44 @@ def run_training_and_capture(
                 x_rearranged = lateral_network.model.s2.rearrange_input(
                     torch.cat([x_view_features, features_lat_median], dim=1))
                 lateral_network.model.s2.hebbian_update(x_rearranged, features_lat_median)
-        
-        # Get average activations across the epoch
-        if epoch_activations:
-            avg_activations = np.mean(np.concatenate(epoch_activations, axis=0), axis=0)
-            # Binarize: 1 if firing (activation > 0.5), 0 otherwise
-            firing_states = (avg_activations > 0.5).astype(np.float32)
-            activation_history.append(firing_states)
-        else:
-            # Default to all inactive
-            firing_states = np.zeros(lateral_network.model.out_channels)
-            activation_history.append(firing_states)
-        
-        # Capture weights
-        weights_4d = get_weights_3d(lateral_network)
-        weights_2d = extract_all_connections(weights_4d)
-        weight_history.append(weights_2d.copy())
-        
-        # Capture lateral weights
-        lateral_weights_2d = get_lateral_weights_2d(lateral_network)
-        lateral_weight_history.append(lateral_weights_2d.copy())
-        
-        # Store input features from first batch of this epoch
-        if epoch_input_features is not None:
-            input_features_history.append(epoch_input_features)
-        else:
-            # Fallback to zeros if no batch was processed
-            input_features_history.append(np.zeros((lateral_network.model.in_channels, 32, 32)))
+            
+            # Capture state at this batch if it's time
+            if batch_idx % capture_interval == 0:
+                # Get current weights
+                weights_4d = get_weights_3d(lateral_network)
+                weights_2d = extract_all_connections(weights_4d)
+                weight_history.append(weights_2d.copy())
+                
+                # Get current lateral weights
+                lateral_weights_2d = get_lateral_weights_2d(lateral_network)
+                lateral_weight_history.append(lateral_weights_2d.copy())
+                
+                # Get current activations by running a forward pass on a sample
+                with torch.no_grad():
+                    sample_batch = batch[0][:1]  # Take first image from current batch
+                    sample_features = feature_extractor(sample_batch)
+                    
+                    # Get firing states
+                    for view_idx in range(sample_features.shape[1]):
+                        x_view = sample_features[:, view_idx, ...]
+                        z_sample = None
+                        for t in range(config["lateral_model"]["max_timesteps"]):
+                            lateral_network.model.update_ts(t)
+                            x_in = torch.cat([x_view, z_sample] if z_sample is not None else x_view, dim=1)
+                            with torch.no_grad():
+                                _, z_bin, _ = lateral_network.model.s2(x_in)
+                            z_float, z_sample = lateral_network.model.s2(x_in)
+                        
+                        # Get firing states from last timestep
+                        firing_states = z_bin.mean(dim=(2, 3)).cpu().numpy()
+                        activation_history.append(firing_states.flatten())
+                        break  # Only process first view
+                
+                # Capture input features
+                feat_np = batch_features[0, 0].cpu().numpy() if batch_features.is_cuda else batch_features[0, 0].numpy()
+                input_features_history.append(feat_np)
+                
+                frame_count += 1
         
         print(f"  Weights: min={weights_2d.min():.6f}, max={weights_2d.max():.6f}, mean={weights_2d.mean():.6f}")
         print(f"  Lateral Weights: min={lateral_weights_2d.min():.6f}, max={lateral_weights_2d.max():.6f}")
@@ -1357,6 +1356,7 @@ def main():
     print(f"Min connection: {args.min_connection}")
     print(f"Lateral threshold: {args.lateral_threshold}")
     print(f"Layout: {args.layout}")
+    print(f"Capture rate: {args.capture_rate} (every {args.capture_rate} batches)")
     
     # Setup
     fabric = setup_fabric(config)
@@ -1388,8 +1388,12 @@ def main():
         lateral_network,
         train_loader,
         test_loader,
-        epochs=args.epochs
+        epochs=args.epochs,
+        capture_rate=args.capture_rate
     )
+    
+    print(f"\nCaptured {len(weight_history)} frames for visualization")
+    print(f"  (from {len(train_loader) * args.epochs} total batches with capture_rate={args.capture_rate})")
     
     # Create visualizations
     output_dir = Path(args.output_dir)
