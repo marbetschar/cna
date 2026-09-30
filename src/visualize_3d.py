@@ -211,13 +211,13 @@ def create_network_positions(
     n_out: int,
     n_in: int,
     layout: str = 'circle'
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Create 3D positions for input, output, and lateral neurons.
+    Create 3D positions for input and output neurons.
     
     Output neurons are placed at z=0 in a grid.
     Input neurons are placed at z=-distance in the specified layout.
-    Lateral positions are offset for clarity.
+    Lateral connections are drawn between output neurons at the same z=0 level.
     """
     # Output neurons at z=0 in a grid
     cols_out = int(np.ceil(np.sqrt(n_out)))
@@ -240,11 +240,7 @@ def create_network_positions(
     input_positions = create_neuron_layout(n_in, layout, radius=2.5)
     input_positions[:, 2] -= 3.0  # Move behind output neurons
     
-    # Lateral neurons at z=3.0 (in front) - same positions as output for lateral connections
-    lateral_positions = output_positions.copy()
-    lateral_positions[:, 2] += 3.0  # Move in front
-    
-    return output_positions, input_positions, lateral_positions
+    return output_positions, input_positions
 
 
 def extract_all_connections(weights_4d: np.ndarray) -> np.ndarray:
@@ -385,7 +381,6 @@ def create_enhanced_visualization(
     lateral_weight_history: List[np.ndarray],
     output_positions: np.ndarray,
     input_positions: np.ndarray,
-    lateral_positions: np.ndarray,
     input_image: Optional[torch.Tensor] = None,
     input_features: Optional[torch.Tensor] = None,
     output_dir: Path = None,
@@ -413,7 +408,6 @@ def create_enhanced_visualization(
         lateral_weight_history,
         output_positions,
         input_positions,
-        lateral_positions,
         input_image=input_image,
         input_features=input_features,
         output_path=output_dir / "network_structure_3d_firing.mp4",
@@ -485,7 +479,6 @@ def create_3d_network_video_with_firing(
     lateral_weight_history: List[np.ndarray],
     output_positions: np.ndarray,
     input_positions: np.ndarray,
-    lateral_positions: np.ndarray,
     input_image: Optional[torch.Tensor] = None,
     input_features: Optional[torch.Tensor] = None,
     output_path: Path = None,
@@ -548,7 +541,7 @@ def create_3d_network_video_with_firing(
     ax_3d.set_zlabel('Z', fontsize=12, labelpad=10)
     
     # Set axis limits to accommodate all neurons
-    all_positions = np.vstack([output_positions, input_positions, lateral_positions])
+    all_positions = np.vstack([output_positions, input_positions])
     x_min, x_max = all_positions[:, 0].min() - 2, all_positions[:, 0].max() + 2
     y_min, y_max = all_positions[:, 1].min() - 2, all_positions[:, 1].max() + 2
     z_min, z_max = all_positions[:, 2].min() - 1, all_positions[:, 2].max() + 1
@@ -653,8 +646,7 @@ def create_3d_network_video_with_firing(
     legend_elements = [
         Patch(facecolor='limegreen', edgecolor='black', label='Firing Neuron'),
         Patch(facecolor='grey', edgecolor='black', label='Inactive Neuron'),
-        Patch(facecolor='red', edgecolor='black', label='Input Neuron'),
-        Patch(facecolor='blue', edgecolor='black', label='Lateral Ref.')
+        Patch(facecolor='red', edgecolor='black', label='Input Neuron')
     ]
     ax_3d.legend(handles=legend_elements, loc='upper right')
     
@@ -1304,7 +1296,7 @@ def main():
     print(f"  Total possible lateral connections: {n_out * n_out}")
     
     # Create neuron positions
-    output_positions, input_positions, lateral_positions = create_network_positions(
+    output_positions, input_positions = create_network_positions(
         n_out, n_in, layout=args.layout
     )
     
@@ -1327,7 +1319,6 @@ def main():
         lateral_weight_history,
         output_positions,
         input_positions,
-        lateral_positions,
         input_image=input_image,
         input_features=input_features,
         output_dir=output_dir,
