@@ -267,6 +267,7 @@ def run_training_and_capture(
                 batch_features = feature_extractor(batch[0])
             
             epoch_activations = []
+            batch_input_features = None  # Will store first view's input for coloring
             
             z = None
             for view_idx in range(batch_features.shape[1]):
@@ -276,6 +277,9 @@ def run_training_and_capture(
                     z = torch.zeros((x_view_features.shape[0], lateral_network.model.out_channels, 
                                      x_view_features.shape[2], x_view_features.shape[3]), 
                                     device=batch[0].device)
+                    # Capture the full input to S2 for the first view, first sample
+                    x_in_first = torch.cat([x_view_features, z], dim=1)
+                    batch_input_features = x_in_first[0].cpu().numpy() if x_in_first.is_cuda else x_in_first[0].numpy()
                 
                 features_lat = []
                 timestep_activations = []
@@ -323,9 +327,9 @@ def run_training_and_capture(
                     firing_states = (avg_activations > 0.5).astype(np.float32)
                     activation_history.append(firing_states)
                 
-                # Capture input features
-                feat_np = batch_features[0, 0].cpu().numpy() if batch_features.is_cuda else batch_features[0, 0].numpy()
-                input_features_history.append(feat_np)
+                # Capture input features (actual input to S2 layer)
+                if batch_input_features is not None:
+                    input_features_history.append(batch_input_features)
                 
                 frame_count += 1
                 epoch_activations = []  # Reset for next capture interval
@@ -541,6 +545,14 @@ def create_3d_network_video_with_firing(
         feat_array = input_features_history[0]
         # Average over spatial dimensions: (channels, height, width) -> (channels,)
         input_activations = feat_array.mean(axis=(1, 2))
+        # If we have fewer activations than input neurons, pad with zeros (inactive)
+        if len(input_activations) < n_in:
+            # Pad with zeros to match n_in
+            padding = np.zeros(n_in - len(input_activations))
+            input_activations = np.concatenate([input_activations, padding])
+        elif len(input_activations) > n_in:
+            # Truncate if we have more activations than input neurons
+            input_activations = input_activations[:n_in]
         # Normalize to [0, 1] for coloring
         input_activations_norm = (input_activations - input_activations.min()) / (input_activations.max() - input_activations.min() + 1e-10)
         # Use viridis colormap for input activations (goes from purple to yellow)
@@ -561,6 +573,12 @@ def create_3d_network_video_with_firing(
         # Fallback to the single sample features
         feat_array = input_features[0, 0].cpu().numpy() if input_features.is_cuda else input_features[0, 0].numpy()
         input_activations = feat_array.mean(axis=(1, 2))
+        # If we have fewer activations than input neurons, pad with zeros (inactive)
+        if len(input_activations) < n_in:
+            padding = np.zeros(n_in - len(input_activations))
+            input_activations = np.concatenate([input_activations, padding])
+        elif len(input_activations) > n_in:
+            input_activations = input_activations[:n_in]
         input_activations_norm = (input_activations - input_activations.min()) / (input_activations.max() - input_activations.min() + 1e-10)
         input_colors = cm.viridis(input_activations_norm)
         input_scatter = ax_3d.scatter(
@@ -692,6 +710,12 @@ def create_3d_network_video_with_firing(
             feat_array = input_features_history[frame]
             # Average over spatial dimensions to get per-channel activation
             input_activations = feat_array.mean(axis=(1, 2))
+            # If we have fewer activations than input neurons, pad with zeros (inactive)
+            if len(input_activations) < n_in:
+                padding = np.zeros(n_in - len(input_activations))
+                input_activations = np.concatenate([input_activations, padding])
+            elif len(input_activations) > n_in:
+                input_activations = input_activations[:n_in]
             # Normalize to [0, 1] for coloring
             if input_activations.max() - input_activations.min() > 1e-10:
                 input_activations_norm = (input_activations - input_activations.min()) / (input_activations.max() - input_activations.min())
