@@ -291,7 +291,8 @@ def run_training_and_capture(
                     # Capture activations for visualization
                     with torch.no_grad():
                         _, z_bin, _ = lateral_network.model.s2(x_in)
-                        firing_states = z_bin.mean(dim=(2, 3))
+                        # Use max instead of mean: a neuron is firing if ANY spatial position is active
+                        firing_states = (z_bin.sum(dim=(2, 3)) > 0).float()
                         timestep_activations.append(firing_states)
                     
                     # Continue with normal training
@@ -323,8 +324,11 @@ def run_training_and_capture(
                 
                 # Get average activations from this batch
                 if epoch_activations:
+                    # Concatenate all activations and average across batch and timesteps
+                    # Each activation is already binary (0 or 1), so averaging gives the fraction of time the neuron fired
                     avg_activations = np.mean(np.concatenate([a.cpu().numpy() for a in epoch_activations], axis=0), axis=0)
-                    firing_states = (avg_activations > 0.5).astype(np.float32)
+                    # A neuron is firing if it fired in any timestep (using > 0 instead of > 0.5)
+                    firing_states = (avg_activations > 0).astype(np.float32)
                     activation_history.append(firing_states)
                 
                 # Capture input features (actual input to S2 layer)
@@ -796,7 +800,7 @@ def create_3d_network_video_with_firing(
         # Update title
         n_strong = np.sum(weights_2d > connection_threshold)
         n_weak = np.sum((weights_2d > min_connection) & (weights_2d <= connection_threshold))
-        n_active = np.sum(firing_states > 0.5)
+        n_active = np.sum(firing_states > 0)
         n_lateral_active = np.sum(lateral_weights_2d > lateral_threshold)
         
         ax_3d.set_title(
@@ -1114,7 +1118,7 @@ def create_activation_heatmap_video(
     
     def update(frame):
         img.set_array(activation_grid[frame])
-        n_active = np.sum(activations_array[frame] > 0.5)
+        n_active = np.sum(activations_array[frame] > 0)
         plt.title(f'Neuron Activation Heatmap - Epoch {frame + 1}\nActive: {n_active}/{n_neurons}', 
                  fontsize=14)
         return img,
@@ -1213,7 +1217,7 @@ def create_connection_stats(
     
     # Neuron activity statistics
     avg_activation = [a.mean() for a in activation_history]
-    n_active_neurons = [np.sum(a > 0.5) for a in activation_history]
+    n_active_neurons = [np.sum(a > 0) for a in activation_history]
     
     video_dpi = min(dpi, 150)
     fig = plt.figure(figsize=(16, 12), dpi=video_dpi)
